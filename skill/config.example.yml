@@ -1,0 +1,41 @@
+# Copy thành `.pr-orchestrator.yml` ở gốc repo khi cần ghi đè.
+# Mọi field đều tuỳ chọn. Thiếu field → skill tự khám phá, không lấy giá trị ví dụ bên dưới làm lệnh thật.
+# Giá trị lệnh bên dưới là placeholder, không phải mặc định của một repo.
+
+repo: "" # owner/name; trống = suy từ git remote hoặc URL PR
+language: vi
+voice: "a/anh" # người nói / cách gọi tác giả PR
+
+# Để trống = khám phá hai model khác họ. `self` chỉ nghĩa là parent đọc diff song song.
+reviewers: []
+
+audit:
+  via: auto # auto | omp | orca
+  mode: parent_plus_one # parent_plus_one (mặc định: luồng chính + 1 auditor phụ) | two (hai auditor riêng)
+  secondary: codex # auditor phụ cho parent_plus_one; model khác họ với parent
+  models: [] # đúng hai selector khác model id; chỉ dùng khi mode: two; trống = khám phá
+
+commands:
+  test: ""
+  typecheck: ""
+  lint: ""
+
+# Gợi ý lọc, không phải lệnh. Ví dụ ý: bỏ lỗi đã có trên base; chỉ xét file và dòng diff thêm.
+typecheck_baseline: "bỏ lỗi cũ; chỉ xét file và dòng thay đổi"
+
+rubric:
+  correctness: 35
+  requirements: 25
+  quality: 15
+  tests: 15
+  scope: 10
+
+merge:
+  min_score: 8.0
+  method: "" # trống = hỏi hoặc lấy method repo cho phép
+  require_ci: false
+
+commit_convention_doc: "" # path tài liệu convention trong repo, nếu có
+forbid_ai_attribution: true
+issue_tracker: "" # linear | jira | github | none | trống = nhận từ link trong PR
+protected_paths: [] # prefix không được sửa; không có danh sách mặc định

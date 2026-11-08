@@ -2,27 +2,84 @@
 
 Parent giữ intake, đọc diff, kiểm chứng cuối, chấm điểm, và mọi thao tác ghi. Auditor không sửa repo, không comment, không merge.
 
-Audit chéo bắt buộc hai model khác họ. Khác mức effort của cùng model id không tính.
+Audit chéo bắt buộc hai model khác họ. Họ là dòng model của nhà cung cấp (vd. Claude và GPT), không phải chuỗi id: khác mức effort, hay hai bản của cùng một dòng, không tính.
 
 ## Mặc định: parent + một auditor phụ
 
 Khi skill chạy trong một luồng chính đang sống (session có model riêng), luồng chính **là auditor A**. Chỉ spawn **một** auditor phụ khác họ model làm auditor B. Không spawn thêm subagent cùng họ với parent — tốn token, không thêm góc nhìn.
 
-- Auditor phụ mặc định: Codex CLI headless (`codex exec --sandbox read-only`), model theo config của Codex trên máy hoặc `audit.secondary`. Ghi model id thật nó báo.
+- Auditor phụ: CLI `audit.secondary_cli` (mặc định `codex`). Model theo thứ tự: model người dùng nêu trong chat (vd. "review với gpt-6.1-sol") → `audit.secondary_model` → key `model` cấp cao trong `config.toml` của Codex (`$CODEX_HOME`, mặc định thư mục `.codex` trong home). Vẫn không có → hỏi một lần. Model mặc định của Codex có thể khác model người dùng muốn; không lặng lẽ rơi về mặc định khi chat đã nêu model.
 - Parent khác họ với auditor phụ là điều kiện bắt buộc. Cùng họ → chọn auditor phụ khác hoặc hỏi một lần.
-- Vòng 1 chạy song song: spawn auditor phụ ở background trước, rồi parent tự review full diff. Parent **ghi log finding của mình ra file theo hợp đồng vòng 1 trước khi đọc log auditor phụ**. Không sửa log đó sau khi đã đọc log kia.
-- Vòng 2: auditor phụ nhận log của parent (một lần gọi nữa). Parent tự audit log của auditor phụ theo hợp đồng vòng 2, ghi phán quyết từng finding.
+- Vòng 1 chạy song song: spawn auditor phụ ở background trước, rồi parent tự review full diff. Parent **ghi log finding của mình vào `$work/a-r1.yaml` theo hợp đồng vòng 1 trước khi đọc log auditor phụ**. Không sửa file đó sau khi đã đọc log kia.
+- Vòng 2: auditor phụ nối tiếp đúng phiên vòng 1 và nhận log của parent. Parent tự audit log của auditor phụ theo hợp đồng vòng 2, ghi phán quyết từng finding.
 - Parent vẫn giữ vai tổng hợp cuối và bước đọc lại `file:line`. Finding mà chỉ parent tìm và chỉ parent `accept` không đủ: cần auditor phụ `accept`, hoặc parent ghi rõ vì sao lời `reject` của phụ sai.
 
-Chỉ dùng hai auditor riêng (mục "Chọn đường" dưới) khi config đặt `audit.mode: two`, hoặc người dùng yêu cầu.
+### Chuẩn bị input — parent, một lần, ngoài repo
 
-`self` trong config nghĩa là parent đọc full diff song song. Trong mode `two` đó không phải model thứ hai; trong `parent_plus_one` parent là auditor A.
+Auditor không gọi mạng. Mỗi lệnh mạng trong sandbox read-only phải xin quyền, và mỗi lần đọc file qua `gh api` mất khoảng 5–17s; đọc tuần tự từng file như vậy là nguyên nhân chính làm auditor chậm. Parent tải sẵn mọi thứ vào `$work`:
+
+```bash
+work=$(mktemp -d)
+gh pr diff <n> --repo <slug> > "$work/pr.diff"
+gh pr view <n> --repo <slug> --json number,title,body,author,baseRefName,headRefOid,commits,files > "$work/pr.json"
+gh api "repos/<slug>" --jq .size        # KB
+mkdir "$work/head"
+gh api "repos/<slug>/tarball/<headRefOid>" > "$work/head.tgz" \
+  && tar -xzf "$work/head.tgz" -C "$work/head" --strip-components=1
+```
+
+`pr.json` `.headRefOid` phải bằng `<headRefOid>` dùng cho tarball. Khác → PR vừa có commit mới: làm lại intake, không trộn diff của head này với snapshot của head khác.
+
+Repo lớn hơn 100000 KB, hoặc tarball lỗi: không tải tarball. Parent chỉ kéo các file trong diff (bỏ file có `changeType` là `DELETED` trong `pr.json`) và các file rule đã đọc, vào đúng đường dẫn dưới `$work/head`:
+
+```bash
+mkdir -p "$(dirname "$work/head/<path>")"
+gh api "repos/<slug>/contents/<path>?ref=<headRefOid>" --jq .content > "$work/b64" \
+  && base64 -d < "$work/b64" > "$work/head/<path>"
+```
+
+`gh api` lỗi, hoặc file ra rỗng trong khi diff có dòng thêm → dừng, không chạy auditor trên snapshot thiếu. File lớn hơn 1 MB không có `.content` qua API này: ghi vào prompt là file đó chỉ có trong diff.
+
+Cần so với base: kéo file base tương ứng vào `$work/base` theo cùng cách, với `ref=<baseRefName>`.
+
+`$work` nằm ngoài repo; đây là file tạm duy nhất `review` được ghi. Prompt vòng 1 và 2 cũng để ở `$work`.
+
+### Gọi Codex
+
+```bash
+codex exec --sandbox read-only --skip-git-repo-check -C "$work/head" -m "$model" \
+  --json -o "$work/b-r1.md" - < "$work/prompt-r1.md" > "$work/b-r1.jsonl" 2> "$work/b-r1.err" &
+b_pid=$!
+# parent review full diff, ghi $work/a-r1.yaml, rồi mới chờ B
+wait "$b_pid" || { echo "auditor B lỗi: $work/b-r1.err"; exit 1; }   # dừng, sang bảng Fallback; không resume
+thread=$(jq -r 'select(.type=="thread.started") | .thread_id' "$work/b-r1.jsonl" | head -n1)
+
+codex exec resume "$thread" --skip-git-repo-check -m "$model" -c 'sandbox_mode="read-only"' \
+  -o "$work/b-r2.md" - < "$work/prompt-r2.md" > /dev/null 2> "$work/b-r2.err"
+```
+
+- Vòng 1 chạy nền (`&`). Shell của tool không giữ job giữa các lần gọi thì chạy lệnh vòng 1 bằng chế độ nền/async của tool thay cho `&` + `wait`. Câu trả lời cuối nằm ở `-o`. `thread_id` lấy từ sự kiện `thread.started` trong JSONL. B lỗi → theo bảng Fallback, không chấm bằng một auditor.
+- Vòng 2 dùng `resume`, không mở phiên mới: auditor giữ những gì đã đọc ở vòng 1, không đọc lại từ đầu. `resume` không có cờ `--sandbox`, nên phải truyền `-c 'sandbox_mode="read-only"'`.
+- `-m` luôn truyền. Auditor không tự biết model id của nó (tự khai sai, vd. "gpt-6" khi chạy `gpt-6.1-sol`). Model thật lấy từ rollout của phiên, sau mỗi vòng:
+
+  ```bash
+  f=$(find "${CODEX_HOME:-$HOME/.codex}/sessions" -name "rollout-*-$thread.jsonl" | head -n1)
+  jq -r 'select(.type=="turn_context") | "\(.payload.model) \(.payload.effort)"' "$f" | sort -u
+  ```
+
+  Phải đúng model đã chọn. Khác, hoặc không tìm thấy rollout → ghi rõ, không ghi model id theo `-m`. Parent điền model thật vào log của B.
+- `audit.codex_ignore_user_config: true` → thêm `--ignore-user-config` vào cả hai lệnh. Cờ này bớt 3–9s khởi động (MCP, plugin, hook), nhưng bỏ luôn provider, profile, `service_tier` của người dùng. Mặc định tắt.
+- Không có `jq`: lấy `thread_id` từ dòng `{"type":"thread.started",...}` đầu tiên của JSONL.
+
+Trước vòng 1 và sau vòng 2, `git status --porcelain` của repo phải giống nhau. Khác trong `review` → dừng, không revert.
+
+Chỉ dùng hai auditor riêng (mục "Chọn đường" dưới) khi config đặt `audit.mode: two`, hoặc người dùng yêu cầu.
 
 ## Chọn đường (mode `two`)
 
 `audit.via` trong config: `omp`, `orca`, hoặc `auto`. Mặc định `auto`.
 
-1. `audit.models` có đủ hai selector khác model id → dùng đúng cặp đó.
+1. `audit.models` có đủ hai selector khác họ model → dùng đúng cặp đó.
 2. `omp` hoặc `auto`, và session có task tool biết `model`: khám phá role, spawn hai task read-only.
 3. `orca` hoặc (`auto` mà bước 2 không tách được hai model): hai agent CLI khác nhau qua orca, trong worktree hiện tại, prompt read-only.
 4. Không có orca: delegator headless trên `PATH` (tên lệnh khám phá được, không hard-code đường dẫn nhà). Hai `--to` khác nhau, prompt read-only.
@@ -76,7 +133,7 @@ Hai lần gọi, hai đích khác nhau, prompt trên stdin, timeout đủ dài, 
 
 ## Hợp đồng vòng 1
 
-Cùng input: slug, số PR, URL, `baseRefName`, head SHA, diff hoặc lệnh `gh pr diff` để tự lấy, rule repo đã đọc (kèm path), config nếu có.
+Cùng input: slug, số PR, URL, `baseRefName`, head SHA, `$work/pr.diff`, `$work/pr.json` (body, commit kèm message), snapshot `$work/head` (và `$work/base` nếu có), rule repo đã đọc (kèm path trong snapshot), config nếu có. Auditor đọc file local, không gọi mạng: không `gh`, `curl`, `git fetch`.
 
 Cấm trong prompt: sửa file, checkout, fetch, stash, commit, push, comment, merge, tạo nhánh, tạo worktree.
 
@@ -84,7 +141,7 @@ Output bắt buộc:
 
 ```yaml
 auditor:
-  model: <model id thật sự chạy, không phải alias>
+  model: <parent điền: model thật (Codex: `turn_context` trong rollout; omp: `model` của task); auditor không tự khai>
   method:
     commands: [{cmd, purpose, result_summary}]
     files_read: [{path, lines, why}]
@@ -106,7 +163,7 @@ rejected_hypotheses:
     why_rejected: ...
 ```
 
-Thiếu `model`, hoặc hai log cùng model id → huỷ cặp, chọn lại. Không chấm trên cặp đó.
+Parent không biết model id đã chạy, hoặc hai log cùng họ model → huỷ cặp, chọn lại. Không chấm trên cặp đó.
 
 `introduced_by_pr: unknown` không được trừ điểm. Parent xác minh hoặc để ngoài điểm.
 

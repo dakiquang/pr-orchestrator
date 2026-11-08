@@ -30,6 +30,7 @@ A PR with no mode runs `review`.
 - No force-push, `--no-verify`, destructive reset or secret commit.
 - Permission covers one PR. Anything else needs a separate request.
 - Commands are discovered from the repository, never guessed.
+- On your own PR (author matches any `gh` login on the machine), the comment drops the mention and the personal voice: score and findings only.
 
 ## Scoring
 
@@ -60,6 +61,6 @@ Then ask your agent to run it on a PR. The instructions are written in Vietnames
 python3 scripts/validate.py
 ```
 
-CI runs the same check on every push: required metadata, internal links, a rubric that sums to 100, and no personal paths or secrets.
+CI runs the same check on every push: required metadata, internal links (README included), a rubric with non-negative weights that sums to 100 and matches every published rubric table, every config key documented in the skill, and no personal paths or secrets.
 
 Built by [Quang Dang](https://quangdk.com).

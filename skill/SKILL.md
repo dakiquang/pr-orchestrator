@@ -48,10 +48,10 @@ Chỉ đưa PR, không nêu mode → `review`.
 
 ## An toàn
 
-- `review` là read-only. Không checkout, fetch, stash, commit, push, comment, merge, sửa file, tạo worktree, tạo nhánh. Danh sách lệnh được phép nằm ở mục Intake.
+- `review` là read-only với repo. Không checkout, fetch, stash, commit, push, comment, merge, sửa file, tạo worktree, tạo nhánh. Danh sách lệnh được phép nằm ở mục Intake. Ngoại lệ duy nhất: file tạm trong `$work` (thư mục `mktemp -d` ngoài repo) cho diff, snapshot, prompt và log auditor — xem [executors.md](executors.md).
 - Worktree bẩn: không tự stash. `fix` / `full` / `test` dừng và hỏi nếu checkout sẽ đè thay đổi chưa commit. `review` vẫn đọc PR từ xa, và ghi nhận worktree bẩn.
 - Không `--no-verify`, force-push, reset huỷ diễn, commit secret, xoá nhánh nếu người dùng không yêu cầu.
-- Không thêm dòng tác giả, `Co-Authored-By`, hay "Generated with" của AI. Chỉ thêm nếu convention của repo bắt buộc và config không cấm. Mặc định là không thêm.
+- Không thêm dòng tác giả, `Co-Authored-By`, hay "Generated with" của AI. Chỉ thêm nếu convention của repo bắt buộc và `forbid_ai_attribution` không phải true. Mặc định là không thêm.
 - Stash chỉ khi người dùng buộc dùng, và chỉ ngoài `review`: `git stash push -m <tag>`, lấy SHA, `git stash apply <sha>`, drop theo tag. Không `git stash` trần, không `pop`.
 - Sửa thẳng working tree để người dùng tự test: không commit. Nói rõ nhánh và file.
 - Sau auditor, `git status --porcelain` phải giống lúc bắt đầu `review`. Nếu khác: dừng, báo file đổi. Không revert, không stash.
@@ -68,10 +68,11 @@ Lấy từ repo hoặc config. Thiếu và không suy được từ file thì h�
 | Lệnh test, typecheck, lint | config `commands` → workflow CI → script manifest / Makefile / tài liệu đóng góp. Không chọn sẵn một trình quản lý gói |
 | Package manager, runtime | lockfile, trường package manager, file version, `engines`. Đọc giá trị thật |
 | Ngôn ngữ comment, giọng | config `language` (mặc định `vi`), `voice` (mặc định `a/anh` = người nói `a`, người được gọi `anh`) |
-| Auditor | config `audit.models` nếu có đúng hai model khác họ; không thì khám phá theo [executors.md](executors.md) |
+| Tự review | tác giả PR so với các login gh trên máy, cộng `self_logins` trong config. Xem mục 1 |
+| Auditor | mặc định parent + `audit.secondary_cli` / `audit.secondary_model`; `audit.models` chỉ khi `audit.mode: two`. Chi tiết: [executors.md](executors.md) |
 | Đường cấm sửa | chỉ `protected_paths` trong config. Không có danh sách mặc định |
 
-Config thiếu field → dùng mặc định của skill, rồi vẫn khám phá lệnh và nhánh như trên.
+Config thiếu field → dùng mặc định của skill, rồi vẫn khám phá lệnh và nhánh như trên. `repo` trong config chỉ dùng khi PR được đưa bằng số, không phải URL.
 
 ## 1. Intake
 
@@ -87,6 +88,14 @@ gh pr checks <pr> --repo <slug>
 
 `gh pr checks` là trạng thái CI từ xa, không phải "đã chạy test local".
 
+Xác định `self_review` (PR của chính người chạy skill):
+
+```bash
+gh auth status --hostname <host> --json hosts --jq '.hosts[][].login'
+```
+
+`self_review` = `author.login` của PR, không phân biệt hoa thường, nằm trong tập login đó hợp với `self_logins` của config. Một người có thể đăng nhập nhiều tài khoản gh; `gh api user` chỉ thấy tài khoản active nên không đủ. `self_review` chỉ đổi cách viết comment ([templates/pr-comment.md](templates/pr-comment.md)), không đổi cách chấm hay cổng.
+
 So sánh head với base bằng API đọc, không fetch:
 
 ```bash
@@ -101,8 +110,11 @@ Ghi nếu head chậm hơn base. Không cập nhật nhánh.
 
 Trước fetch, kiểm tra ref `pr-<n>-review`. Đã tồn tại mà người dùng không bảo ghi đè → dừng và hỏi. Không reset nhánh review cũ.
 
+Chọn remote có URL trỏ đúng `<slug>` (`git remote -v`). Không có remote nào khớp → dừng và hỏi, không fetch từ `origin` đoán mò.
+
 ```bash
-git fetch origin pull/<n>/head:pr-<n>-review
+git fetch <remote> pull/<n>/head:pr-<n>-review
+git rev-parse pr-<n>-review    # phải bằng headRefOid; khác → dừng
 git checkout pr-<n>-review
 ```
 
@@ -132,12 +144,12 @@ Finding của auditor chỉ vào điểm sau khi parent đọc lại đúng dòn
 
 Với mỗi finding còn sống:
 
-- Đọc caller, route, reducer, test quanh dòng đó, từ head SHA của PR (`gh api repos/<slug>/contents/<path>?ref=<headRefOid>` hoặc `git show <sha>:<path>` nếu object đã có local). Grep working tree chỉ là bằng chứng nếu HEAD local đúng là head của PR. Nếu không, nói rõ và không dùng grep đó để kết tội PR.
+- Đọc caller, route, reducer, test quanh dòng đó, từ head SHA của PR (snapshot `$work/head`, `gh api repos/<slug>/contents/<path>?ref=<headRefOid>`, hoặc `git show <sha>:<path>` nếu object đã có local). Grep working tree chỉ là bằng chứng nếu HEAD local đúng là head của PR. Nếu không, nói rõ và không dùng grep đó để kết tội PR.
 - Cùng mẫu ở chỗ khác trong đúng revision của PR.
 - Hồi quy so với base: dòng base mất khi giải conflict, hoặc hành vi base bị đổi ngoài yêu cầu.
 - Commit không liên quan lẫn trong PR.
 - Secret, file env bị commit.
-- Convention commit của repo, gồm cấm attribution AI nếu repo hoặc config cấm.
+- Convention commit của repo (`commit_convention_doc` nếu config có, không thì tài liệu đóng góp), gồm cấm attribution AI nếu repo cấm hoặc `forbid_ai_attribution` là true.
 - Test có lệnh chạy được không. `review` không chạy lệnh đó.
 
 Tách "do PR gây ra" và "có từ trước". Chỉ trừ điểm phần do PR gây ra. Phần có từ trước ghi riêng, không trừ.
@@ -166,7 +178,7 @@ Rubric mặc định, mỗi hạng 0–10, rồi nhân trọng số:
 | Test và kiểm chứng | 15% |
 | Phạm vi và bảo trì | 10% |
 
-Repo có rubric riêng thì dùng rubric đó. Làm tròn 0.5 sau khi cộng. Trần điểm trong [gates.md](gates.md) áp sau khi làm tròn; trần thắng nếu làm tròn vượt trần.
+Repo có rubric riêng thì dùng rubric đó; không có thì config `rubric` (nếu có) thay trọng số mặc định. Làm tròn 0.5 sau khi cộng. Trần điểm trong [gates.md](gates.md) áp sau khi làm tròn; trần thắng nếu làm tròn vượt trần. Đối chiếu điểm với khung điểm trong [gates.md](gates.md).
 
 Không trừ hai lần cho cùng một finding.
 
@@ -176,15 +188,17 @@ Không trừ hai lần cho cùng một finding.
 
 - `review`: in báo cáo trong chat. Không đăng, không sửa.
 - `fix`: sửa nhỏ nhất đúng finding đã kiểm chứng. Không refactor kèm. Test cho hành vi vừa sửa khi có lệnh test và viết test là khả thi. Chấm lại một lần. Còn kẹt cổng → dừng, hỏi.
-- `full`: như `fix`, rồi comment và merge chỉ khi cổng mở và chat này đã gọi `full` cho PR này.
+- `full`: như `fix`, rồi comment và merge chỉ khi cổng merge trong [gates.md](gates.md) mở và chat này đã gọi `full` cho PR này.
 - `test`: báo lệnh, exit code, lỗi mới so với baseline. Không sửa để cho test xanh trừ khi mode là `fix` hoặc `full`.
 - `sync`: mục 8.
 
 ## 8. Comment, merge, release, sync
 
-Comment: điền [templates/pr-comment.md](templates/pr-comment.md) theo `language` và `voice`. Không khen thừa. Không câu nào vượt quá bằng chứng ở mục 3–5. Đăng bằng `gh pr comment` chỉ khi mode và chat cho phép. Body để ở file tạm ngoài repo.
+Ngay trước comment hoặc merge: đọc lại `headRefOid`. Khác SHA đã review → review lại phần mới, không đăng điểm cũ, không merge.
 
-Merge: `gh pr merge` theo `merge.method` trong config. Config không nói: đọc method repo cho phép (`gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`). Nhiều method đều được → hỏi một lần. Không `--delete-branch` trừ khi được yêu cầu.
+Comment: điền [templates/pr-comment.md](templates/pr-comment.md) theo `language` và `voice`; `self_review` thì theo mục "PR của chính mình" trong template. Không khen thừa. Không câu nào vượt quá bằng chứng ở mục 3–5. Đăng bằng `gh pr comment <n> --repo <slug> --body-file <file>` chỉ khi mode và chat cho phép. Body để ở file tạm ngoài repo.
+
+Merge: `gh pr merge <n> --repo <slug> --match-head-commit <SHA đã review>` theo `merge.method` trong config. Config không nói: đọc method repo cho phép (`gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`). Nhiều method đều được → hỏi một lần. Không `--delete-branch` trừ khi được yêu cầu.
 
 Release, chỉ khi chat yêu cầu release:
 
@@ -197,4 +211,13 @@ Release, chỉ khi chat yêu cầu release:
 Sync, chỉ khi có `--target` và chat gọi `sync`:
 
 - Không giả định tên nhánh đích.
-- `git cherry-pick -x` từng commit đã merge. Conflict → dừng, không force-push, không tự giải bằng cách bỏ code base.
+- `git status --porcelain` rỗng. Không rỗng → dừng, hỏi, không stash.
+- Commit chưa có local → `git fetch <remote> <baseRefName>` từ remote khớp `<slug>`.
+- Xác định commit cần đưa (chỉ ghi SHA, chưa cherry-pick): `gh pr view <n> --repo <slug> --json mergeCommit,commits,state`. `state` phải là `MERGED`.
+  - `mergeCommit` có hai parent (`git rev-list --parents -n 1 <mergeCommit>`): merge commit → `<mergeCommit>`, cherry-pick với `-m 1`.
+  - Một parent, squash: đúng `<mergeCommit>`.
+  - Một parent, rebase: `len(commits)` commit cuối của base, tính tới `mergeCommit` (`git rev-list --reverse -n <len> <mergeCommit>`).
+  - Không phân biệt được squash với rebase → hỏi một lần.
+- `git switch <target>` rồi `git rev-parse --abbrev-ref HEAD` phải là `<target>`.
+- Cherry-pick một lần, theo thứ tự: `git cherry-pick -x <sha>…`, thêm `-m 1` nếu là merge commit. Conflict → `git cherry-pick --abort`, dừng, báo. Không force-push, không tự giải bằng cách bỏ code base.
+- Push nhánh đích chỉ khi chat yêu cầu push.

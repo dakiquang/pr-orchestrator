@@ -6,13 +6,26 @@ Trước khi đăng hoặc in: thay giọng và ngôn ngữ theo config. `langua
 
 Finding loại bỏ thì một dòng lý do, không giải thích dài.
 
+## PR của chính mình
+
+`self_review` (SKILL.md mục 1) là true → vẫn chấm, vẫn đưa finding, vẫn đăng nếu người gọi yêu cầu. Khác PR thường:
+
+- Bỏ dòng `cc @<author> …`. Không mention tác giả.
+- Không câu "đã review xong", "xem lại giúp".
+- Không đại từ ở bất kỳ mục nào, kể cả "Nguồn review" và "Đã loại". Viết câu không chủ ngữ: "Đã loại", "Đã đọc lại dòng được trích".
+- Câu mở thay bằng một dòng: `Điểm X/10 — <verdict>. <còn N finding cần sửa | không còn finding chặn merge>.`
+
+`voice` không áp cho PR của chính mình.
+
+## Mẫu
+
 ```markdown
 ## Review chấm điểm — <issue-id hoặc "không có issue"> / PR #<number>
 
 **Điểm tổng: X / 10**
 **Verdict:** Có thể merge | Nên sửa trước khi merge | Chưa nên merge
 
-cc @<author> a đã review xong. <một câu: còn finding cần xem, hoặc có thể merge>.
+<câu mở — xem cuối file>
 
 ### Nguồn review
 - **Auditor:** <model A> và <model B> — audit chéo cách tìm và cách kiểm chứng. Bất đồng: <ngắn, hoặc không>
@@ -35,6 +48,7 @@ cc @<author> a đã review xong. <một câu: còn finding cần xem, hoặc có
 | <điều kiện> | <file hoặc "không có"> | đạt / chưa / ngoài scope |
 
 ### Bảng điểm
+<!-- Một hàng cho mỗi hạng của rubric đã áp, đúng tên và trọng số. Dưới đây là rubric mặc định. -->
 
 | Hạng mục | Trọng số | Điểm | Bằng chứng |
 |---|---:|---:|---|
@@ -59,16 +73,15 @@ cc @<author> a đã review xong. <một câu: còn finding cần xem, hoặc có
 <1–2 câu. Có merge được không, và vì cổng nào.>
 ```
 
-Verdict:
+Verdict lấy theo bảng Verdict trong [gates.md](../gates.md). Không tự đặt điều kiện khác.
 
-| Điều kiện | Verdict |
-|---|---|
-| ≥ ngưỡng merge, không blocker, không important, test bắt buộc không fail | Có thể merge |
-| Không blocker, nhưng dưới ngưỡng hoặc còn important | Nên sửa trước khi merge |
-| Còn blocker, hoặc test bắt buộc fail | Chưa nên merge |
+## Câu mở
 
-Câu mở khi chưa merge: `cc @<author> a đã review xong, còn finding bên dưới, chưa merge, xem lại giúp a.`
+PR của người khác:
 
-Câu mở khi merge được: `cc @<author> a đã review xong, điểm X/10, có thể merge.`
+- Chưa merge được: `cc @<author> a đã review xong, còn finding bên dưới, chưa merge, xem lại giúp a.`
+- Merge được: `cc @<author> a đã review xong, điểm X/10, có thể merge.`
 
 Đổi `a` / `anh` theo `voice`. Không giữ "a" nếu config đặt giọng khác.
+
+PR của chính mình: dòng trung tính ở mục "PR của chính mình", không cc, không đại từ.

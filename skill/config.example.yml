@@ -4,24 +4,21 @@
 
 repo: "" # owner/name; trống = suy từ git remote hoặc URL PR
 language: vi
-voice: "a/anh" # người nói / cách gọi tác giả PR
-
-# Để trống = khám phá hai model khác họ. `self` chỉ nghĩa là parent đọc diff song song.
-reviewers: []
+voice: "a/anh" # người nói / cách gọi tác giả PR; không áp cho PR của chính mình
+self_logins: [] # login gh khác của chính mình; cộng với các login trong `gh auth status`
 
 audit:
-  via: auto # auto | omp | orca
+  via: auto # auto | omp | orca; chỉ dùng khi mode: two
   mode: parent_plus_one # parent_plus_one (mặc định: luồng chính + 1 auditor phụ) | two (hai auditor riêng)
-  secondary: codex # auditor phụ cho parent_plus_one; model khác họ với parent
-  models: [] # đúng hai selector khác model id; chỉ dùng khi mode: two; trống = khám phá
+  secondary_cli: codex # CLI của auditor phụ trong parent_plus_one
+  secondary_model: "" # model id truyền bằng -m; trống = key `model` trong config.toml của Codex
+  codex_ignore_user_config: false # true = thêm --ignore-user-config: khởi động nhanh hơn, bỏ provider/profile của người dùng
+  models: [] # đúng hai selector khác họ model; chỉ dùng khi mode: two; trống = khám phá
 
 commands:
   test: ""
   typecheck: ""
   lint: ""
-
-# Gợi ý lọc, không phải lệnh. Ví dụ ý: bỏ lỗi đã có trên base; chỉ xét file và dòng diff thêm.
-typecheck_baseline: "bỏ lỗi cũ; chỉ xét file và dòng thay đổi"
 
 rubric:
   correctness: 35

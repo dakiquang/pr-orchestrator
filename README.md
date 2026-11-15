@@ -7,6 +7,16 @@ One model writes, another reviews, a person decides.
 
 PR Orchestrator is an agent skill that reviews a pull request with two models from different families. They cross-check each other's findings, each finding is verified against the code, and the PR gets a score against a weighted rubric. It works with any repository: nothing about the language, package manager or branch names is assumed.
 
+### ☕ Found it useful? Buy me a coffee
+
+If this project saves you time, a coffee keeps it maintained. Any amount helps. More
+options on the [donate page](https://dakiquang.github.io/donate/).
+
+| MoMo · VietQR | PayPal |
+|:---:|:---:|
+| <img src="https://dakiquang.github.io/donate/images/qr-momo.png" width="180" alt="MoMo and VietQR code"> | <img src="https://dakiquang.github.io/donate/images/qr-paypal.png" width="180" alt="PayPal QR code"> |
+| [![Mở MoMo](https://img.shields.io/badge/M%E1%BB%9F%20MoMo-%E2%86%92-A50064?style=for-the-badge)](https://me.momo.vn/dakiquang) | [![Open PayPal](https://img.shields.io/badge/Open%20PayPal-%E2%86%92-0070BA?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/dakiquang) |
+
 ## Why
 
 A model reviewing its own work tends to agree with itself. A second model catches a different class of mistake, but two opinions are not enough: findings still need evidence, and merging still needs a person's permission.

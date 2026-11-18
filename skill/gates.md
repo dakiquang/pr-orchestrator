@@ -14,6 +14,7 @@ Cổng mở khi tất cả đúng:
 4. PR mở, mergeable, không conflict.
 5. Không còn review request chưa giải mà repo coi là bắt buộc.
 6. Head của PR vẫn là SHA đã review. Có commit mới → review lại phần mới trước.
+7. PR không còn draft. Draft là điều kiện duy nhất `full` được tự gỡ, bằng `gh pr ready`, và chỉ khi điều 1–6 đã mở; ghi lại đã làm.
 
 Thiếu một điều → cổng đóng. Không hạ cổng để merge cho xong.
 
@@ -52,13 +53,20 @@ Dùng để đối chiếu điểm đã cộng trọng số với finding còn l
 | 5.5–6.5 | 1–2 blocker | Chưa nên merge |
 | ≤ 5.0 | ≥ 3 blocker, hoặc lệch yêu cầu chính | Chưa nên merge |
 
+Ví dụ neo (review thật, cùng rubric mặc định):
+
+| PR | Finding còn lại | Điểm |
+|---|---|---:|
+| `dakiquang/qk#35` | không; đủ test hồi quy; một dòng trống thừa đã sửa khi giải conflict | 9.5 |
+| `dakiquang/qk#37` | important đã sửa trong PR kèm test; một giới hạn phạm vi đã ghi trong mô tả | 9.0 |
+
 Điểm rơi ngoài khung ứng với finding → xem lại điểm từng hạng, rồi ghi lý do nếu vẫn giữ. Trần luôn thắng khung.
 
 ## Verdict
 
 | Điều kiện | Verdict |
 |---|---|
-| Cổng merge mở (mục Cổng merge, điều 1–6) | Có thể merge |
+| Cổng merge mở (mục Cổng merge, điều 1–7) | Có thể merge |
 | Không blocker, test bắt buộc không fail, nhưng cổng đóng (dưới ngưỡng, còn important, CI bắt buộc đỏ, không mergeable, còn review request bắt buộc) | Nên sửa trước khi merge |
 | Còn blocker, hoặc test bắt buộc fail | Chưa nên merge |
 

@@ -14,40 +14,54 @@ Khi skill chạy trong một luồng chính đang sống (session có model riê
 - Vòng 2: auditor phụ nối tiếp đúng phiên vòng 1 và nhận log của parent. Parent tự audit log của auditor phụ theo hợp đồng vòng 2, ghi phán quyết từng finding.
 - Parent vẫn giữ vai tổng hợp cuối và bước đọc lại `file:line`. Finding mà chỉ parent tìm và chỉ parent `accept` không đủ: cần auditor phụ `accept`, hoặc parent ghi rõ vì sao lời `reject` của phụ sai.
 
+### Kiểm auditor phụ trước — parent, trước khi tải input
+
+`audit.preflight` (mặc định true): một lượt rất ngắn, tốn một ít quota, để biết sớm model có chạy không.
+
+```bash
+echo "Reply OK" | codex exec --sandbox read-only --skip-git-repo-check -m "$model" --json - 2>/dev/null \
+  | jq -r 'select(.type=="error" or .type=="turn.failed") | .message // .error.message' | head -n1
+```
+
+In ra gì → auditor phụ không chạy được (model không hỗ trợ, hết hạn mức…): in nguyên văn, sang bảng Fallback. Không tải input, không chấm. Mã thoát của `codex exec` không đủ tin; luôn đọc sự kiện lỗi trong JSONL, ở cả vòng 1 và 2.
+
 ### Chuẩn bị input — parent, một lần, ngoài repo
 
 Auditor không gọi mạng. Mỗi lệnh mạng trong sandbox read-only phải xin quyền, và mỗi lần đọc file qua `gh api` mất khoảng 5–17s; đọc tuần tự từng file như vậy là nguyên nhân chính làm auditor chậm. Parent tải sẵn mọi thứ vào `$work`:
 
 ```bash
-work=$(mktemp -d)
-gh pr diff <n> --repo <slug> > "$work/pr.diff"
-gh pr view <n> --repo <slug> --json number,title,body,author,baseRefName,headRefOid,commits,files > "$work/pr.json"
+work="${TMPDIR:-/tmp}/pr-orchestrator/<owner>-<repo>-<n>-<sha7>[_<n>-<sha7>…]"   # cố định để chạy tiếp được; nhiều PR nối bằng _
+mkdir -p "$work"
+gh pr diff <n> --repo <slug> > "$work/pr<n>.diff"          # lặp cho mỗi PR trong lần gọi
+gh pr view <n> --repo <slug> --json number,title,body,author,baseRefName,headRefOid,isDraft,commits,files > "$work/pr<n>.json"
 gh api "repos/<slug>" --jq .size        # KB
-mkdir "$work/head"
-gh api "repos/<slug>/tarball/<headRefOid>" > "$work/head.tgz" \
-  && tar -xzf "$work/head.tgz" -C "$work/head" --strip-components=1
+mkdir "$work/head<n>"
+gh api "repos/<slug>/tarball/<headRefOid>" > "$work/head<n>.tgz" \
+  && tar -xzf "$work/head<n>.tgz" -C "$work/head<n>" --strip-components=1
 ```
 
-`pr.json` `.headRefOid` phải bằng `<headRefOid>` dùng cho tarball. Khác → PR vừa có commit mới: làm lại intake, không trộn diff của head này với snapshot của head khác.
+`pr<n>.json` `.headRefOid` phải bằng `<headRefOid>` dùng cho tarball. Khác → PR vừa có commit mới: làm lại intake, không trộn diff của head này với snapshot của head khác.
 
-Repo lớn hơn 100000 KB, hoặc tarball lỗi: không tải tarball. Parent chỉ kéo các file trong diff (bỏ file có `changeType` là `DELETED` trong `pr.json`) và các file rule đã đọc, vào đúng đường dẫn dưới `$work/head`:
+Repo lớn hơn 100000 KB, hoặc tarball lỗi: không tải tarball. Parent chỉ kéo các file trong diff (bỏ file có `changeType` là `DELETED` trong `pr<n>.json`) và các file rule đã đọc, vào đúng đường dẫn dưới `$work/head<n>`:
 
 ```bash
-mkdir -p "$(dirname "$work/head/<path>")"
+mkdir -p "$(dirname "$work/head<n>/<path>")"
 gh api "repos/<slug>/contents/<path>?ref=<headRefOid>" --jq .content > "$work/b64" \
-  && base64 -d < "$work/b64" > "$work/head/<path>"
+  && base64 -d < "$work/b64" > "$work/head<n>/<path>"
 ```
 
 `gh api` lỗi, hoặc file ra rỗng trong khi diff có dòng thêm → dừng, không chạy auditor trên snapshot thiếu. File lớn hơn 1 MB không có `.content` qua API này: ghi vào prompt là file đó chỉ có trong diff.
 
-Cần so với base: kéo file base tương ứng vào `$work/base` theo cùng cách, với `ref=<baseRefName>`.
+Cần so với base: kéo file base tương ứng vào `$work/base<n>` theo cùng cách, với `ref=<baseRefName>`.
 
 `$work` nằm ngoài repo; đây là file tạm duy nhất `review` được ghi. Prompt vòng 1 và 2 cũng để ở `$work`.
+
+`$work` đã có `state.json` (từ lần bị chặn trước) và `headRefOid` vẫn khớp → dùng lại input và `a-r1.yaml`, không viết lại log của parent; chỉ chạy phần auditor phụ còn thiếu. Head khác → thư mục mới, làm lại intake.
 
 ### Gọi Codex
 
 ```bash
-codex exec --sandbox read-only --skip-git-repo-check -C "$work/head" -m "$model" \
+codex exec --sandbox read-only --skip-git-repo-check -C "$work" -m "$model" \
   --json -o "$work/b-r1.md" - < "$work/prompt-r1.md" > "$work/b-r1.jsonl" 2> "$work/b-r1.err" &
 b_pid=$!
 # parent review full diff, ghi $work/a-r1.yaml, rồi mới chờ B
@@ -133,35 +147,7 @@ Hai lần gọi, hai đích khác nhau, prompt trên stdin, timeout đủ dài, 
 
 ## Hợp đồng vòng 1
 
-Cùng input: slug, số PR, URL, `baseRefName`, head SHA, `$work/pr.diff`, `$work/pr.json` (body, commit kèm message), snapshot `$work/head` (và `$work/base` nếu có), rule repo đã đọc (kèm path trong snapshot), config nếu có. Auditor đọc file local, không gọi mạng: không `gh`, `curl`, `git fetch`.
-
-Cấm trong prompt: sửa file, checkout, fetch, stash, commit, push, comment, merge, tạo nhánh, tạo worktree.
-
-Output bắt buộc:
-
-```yaml
-auditor:
-  model: <parent điền: model thật (Codex: `turn_context` trong rollout; omp: `model` của task); auditor không tự khai>
-  method:
-    commands: [{cmd, purpose, result_summary}]
-    files_read: [{path, lines, why}]
-    not_run: [{what, why}]
-findings:
-  - id: A1
-    severity: blocker|important|nit
-    introduced_by_pr: true|false|unknown
-    file: path
-    line: N
-    claim: ...
-    impact: ...
-    fix: ...
-    found_by: <lệnh tìm hoặc file đã mở trước khi kết luận>
-    verified_by: <dòng đã đọc hoặc lệnh đã chạy lại>
-    falsifier: <bằng chứng nào sẽ bác finding>
-rejected_hypotheses:
-  - claim: ...
-    why_rejected: ...
-```
+Cùng input cho mọi auditor, theo [templates/prompt-r1.md](templates/prompt-r1.md): mỗi PR `pr<n>.diff`, `pr<n>.json` (body, commit kèm message), snapshot `head<n>/` (và `base<n>/` nếu có), rule repo đã đọc, config nếu có. Auditor đọc file local, không gọi mạng. Mẫu giữ nguyên lệnh cấm và YAML output; không viết lại tay.
 
 Parent không biết model id đã chạy, hoặc hai log cùng họ model → huỷ cặp, chọn lại. Không chấm trên cặp đó.
 
@@ -178,6 +164,8 @@ Mỗi auditor đọc lại dòng bên kia đã trích. Với từng finding:
 | `unverified` | Claim có thể đúng nhưng log không đủ để kiểm lại |
 
 Không thêm finding mới ở vòng 2. Finding mới chỉ từ vòng 1 hoặc từ parent sau khi parent tự kiểm chứng và ghi nguồn `parent`.
+
+Prompt và YAML phán quyết: [templates/prompt-r2.md](templates/prompt-r2.md).
 
 Ô trống phương pháp là lỗi phương pháp, dù kết luận nghe hợp lý. `accept` không có `files_read` trỏ đúng claim → parent hạ xuống `unverified`.
 
@@ -207,5 +195,6 @@ Dù hai auditor im: secret, commit lạ, convention commit, mất code base khi 
 | Không có task tool | Sang orca, rồi headless |
 | Orca không chạy | Không tự mở app để review. Sang headless hoặc hỏi |
 | Một auditor timeout | Không chấm bằng auditor còn lại. Chạy lại auditor đó một lần, hoặc hỏi |
+| Auditor phụ hết hạn mức, hoặc model không chạy | Không chấm bằng một auditor, không thử lại vòng lặp. Ghi `$work/state.json` (`{pr, head, model, done: [...], error, a_r1}`) và in lỗi nguyên văn (có giờ reset nếu Codex báo). Có `audit.backup_model` khác họ với parent → hỏi một lần có dùng không; không có → hỏi chờ hay đổi model |
 | Auditor sửa tree trong `review` | Dừng. Báo file. Không dọn |
 | Lệnh test không khám phá được | Ghi "chưa chạy được". Không bịa lệnh, không bịa kết quả |

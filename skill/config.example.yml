@@ -6,12 +6,15 @@ repo: "" # owner/name; trống = suy từ git remote hoặc URL PR
 language: vi
 voice: "a/anh" # người nói / cách gọi tác giả PR; không áp cho PR của chính mình
 self_logins: [] # login gh khác của chính mình; cộng với các login trong `gh auth status`
+gh_user: "" # login gh dùng cho mọi lệnh của skill (GH_TOKEN theo lệnh); trống = tài khoản active
 
 audit:
   via: auto # auto | omp | orca; chỉ dùng khi mode: two
   mode: parent_plus_one # parent_plus_one (mặc định: luồng chính + 1 auditor phụ) | two (hai auditor riêng)
   secondary_cli: codex # CLI của auditor phụ trong parent_plus_one
   secondary_model: "" # model id truyền bằng -m; trống = key `model` trong config.toml của Codex
+  preflight: true # một lượt ngắn trước khi tải input để biết sớm model có chạy (tốn một ít quota)
+  backup_model: "" # auditor phụ dự phòng khác họ với parent khi auditor chính hết quota; trống = chỉ hỏi chờ
   codex_ignore_user_config: false # true = thêm --ignore-user-config: khởi động nhanh hơn, bỏ provider/profile của người dùng
   models: [] # đúng hai selector khác họ model; chỉ dùng khi mode: two; trống = khám phá
 

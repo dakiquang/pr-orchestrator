@@ -205,7 +205,10 @@ Ngay trước comment hoặc merge: đọc lại `headRefOid`. Khác SHA đã re
 
 Comment: điền [templates/pr-comment.md](templates/pr-comment.md) theo `language` và `voice`; `self_review` thì theo mục "PR của chính mình" trong template. Không khen thừa. Không câu nào vượt quá bằng chứng ở mục 3–5. Đăng bằng `gh pr comment <n> --repo <slug> --body-file <file>` chỉ khi mode và chat cho phép. Body để ở file tạm ngoài repo.
 
-PR nối nhau, repo squash merge: merge PR dưới trước. Rồi `gh pr edit <trên> --base <base gốc>`, `git rebase --onto <base gốc> <head cũ của PR dưới> <nhánh trên>`, chạy lại test, đọc lại diff, review phần đổi. Push sau rebase là force-push: cần một câu riêng trong chat.
+PR nối nhau, repo squash merge: merge PR dưới trước, rồi `gh pr edit <trên> --base <base gốc>`. Thường sẽ conflict vì commit squash lặp lại nội dung PR dưới.
+
+- Mặc định, không force-push: `git diff <head đã review của PR dưới> <commit squash>` phải rỗng. Rỗng → `git merge <remote>/<base gốc>` vào nhánh trên, giải mọi conflict bằng `git checkout <head đã review của PR trên> -- .`, rồi `git diff <head đã review của PR trên> HEAD` phải rỗng. Push thường. Head mới có cây giống hệt bản đã chấm, nên chỉ cần chờ CI rồi merge với `--match-head-commit <head mới>`.
+- Diff đầu không rỗng (base gốc có thêm commit khác), hoặc repo cấm merge commit trong nhánh: giải conflict tay, chạy lại test, review phần đổi. Nếu phải `git rebase --onto <base gốc> <head cũ của PR dưới> <nhánh trên>` thì push là force-push: cần một câu riêng trong chat.
 
 Merge: `gh pr merge <n> --repo <slug> --match-head-commit <SHA đã review>` theo `merge.method` trong config. Config không nói: đọc method repo cho phép (`gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`). Nhiều method đều được → hỏi một lần. Không `--delete-branch` trừ khi được yêu cầu.
 

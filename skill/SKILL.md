@@ -44,7 +44,7 @@ Rubric hoặc skill chấm điểm của repo ghi đè rubric mặc định khi 
 
 Chỉ đưa PR, không nêu mode → `review`.
 
-`full` chỉ cho phép, với đúng PR này: push commit sửa, comment điểm, merge. Đóng PR khác, tạo release, sửa body PR, force-push, xoá nhánh: cần một câu riêng trong chat này. Một lần đồng ý không áp dụng cho việc khác, PR khác, hay nhánh khác.
+`full` chỉ cho phép, với đúng PR này: push commit sửa, comment điểm, gỡ draft khi cổng khác đã mở, merge. Đóng PR khác, tạo release, sửa body PR, force-push, xoá nhánh: cần một câu riêng trong chat này. Một lần đồng ý không áp dụng cho việc khác, PR khác, hay nhánh khác.
 
 ## An toàn
 
@@ -69,6 +69,7 @@ Lấy từ repo hoặc config. Thiếu và không suy được từ file thì h�
 | Package manager, runtime | lockfile, trường package manager, file version, `engines`. Đọc giá trị thật |
 | Ngôn ngữ comment, giọng | config `language` (mặc định `vi`), `voice` (mặc định `a/anh` = người nói `a`, người được gọi `anh`) |
 | Tự review | tác giả PR so với các login gh trên máy, cộng `self_logins` trong config. Xem mục 1 |
+| Tài khoản gh | config `gh_user`: có → mọi lệnh `gh` và push của skill dùng `GH_TOKEN=$(gh auth token --user <gh_user>)` theo từng lệnh (push qua credential helper tạm đọc biến đó). Không đổi tài khoản active, không ghi token vào lệnh hay file |
 | Auditor | mặc định parent + `audit.secondary_cli` / `audit.secondary_model`; `audit.models` chỉ khi `audit.mode: two`. Chi tiết: [executors.md](executors.md) |
 | Đường cấm sửa | chỉ `protected_paths` trong config. Không có danh sách mặc định |
 
@@ -76,12 +77,16 @@ Config thiếu field → dùng mặc định của skill, rồi vẫn khám phá
 
 ## 1. Intake
 
-Tách args: mode, PR (URL hoặc số), `--target`, `--filter`. `--wait` / `--background` chỉ là gợi ý chờ auditor, không mở thêm quyền sửa.
+Tách args: mode, một hoặc nhiều PR (URL hoặc số), `--target`, `--filter`.
+
+Nhiều PR (tối đa 3, hoặc ~2.000 dòng diff tổng; vượt thì chạy riêng): intake từng PR, một `$work` và một phiên auditor phụ chung, mỗi finding ghi `pr`. PR nối nhau (base là head của PR khác) thì ghi quan hệ vào prompt; mỗi diff so với base của chính PR đó. Chấm, cổng, comment, merge vẫn riêng từng PR.
+
+ `--wait` / `--background` chỉ là gợi ý chờ auditor, không mở thêm quyền sửa.
 
 Đọc PR:
 
 ```bash
-gh pr view <pr> --repo <slug> --json number,title,body,author,baseRefName,headRefName,headRefOid,state,url,mergeable,mergeStateStatus,additions,deletions,changedFiles,files,commits,reviews,comments,statusCheckRollup
+gh pr view <pr> --repo <slug> --json number,title,body,author,baseRefName,headRefName,headRefOid,state,isDraft,url,mergeable,mergeStateStatus,additions,deletions,changedFiles,files,commits,reviews,comments,statusCheckRollup
 gh pr diff <pr> --repo <slug>
 gh pr checks <pr> --repo <slug>
 ```
@@ -144,7 +149,7 @@ Finding của auditor chỉ vào điểm sau khi parent đọc lại đúng dòn
 
 Với mỗi finding còn sống:
 
-- Đọc caller, route, reducer, test quanh dòng đó, từ head SHA của PR (snapshot `$work/head`, `gh api repos/<slug>/contents/<path>?ref=<headRefOid>`, hoặc `git show <sha>:<path>` nếu object đã có local). Grep working tree chỉ là bằng chứng nếu HEAD local đúng là head của PR. Nếu không, nói rõ và không dùng grep đó để kết tội PR.
+- Đọc caller, route, reducer, test quanh dòng đó, từ head SHA của PR (snapshot `$work/head<n>`, `gh api repos/<slug>/contents/<path>?ref=<headRefOid>`, hoặc `git show <sha>:<path>` nếu object đã có local). Grep working tree chỉ là bằng chứng nếu HEAD local đúng là head của PR. Nếu không, nói rõ và không dùng grep đó để kết tội PR.
 - Cùng mẫu ở chỗ khác trong đúng revision của PR.
 - Hồi quy so với base: dòng base mất khi giải conflict, hoặc hành vi base bị đổi ngoài yêu cầu.
 - Commit không liên quan lẫn trong PR.
@@ -160,7 +165,7 @@ Finding loại: một dòng lý do (sai, có từ trước, thiếu ngữ cảnh
 
 Chỉ `test` / `fix` / `full`.
 
-Chạy test của phần diff, typecheck lọc theo file đổi, lint chỉ xét dòng mới. Lệnh lấy từ mục 0. Không rõ → ghi "chưa chạy được", không bịa output.
+Chạy test của phần diff, typecheck lọc theo file đổi, lint chỉ xét dòng mới. Lệnh lấy từ mục 0. Không rõ → ghi "chưa chạy được", không bịa output. Output đầy đủ ghi vào `$work/test-<tên>.log`, báo cáo trích từ log; không cắt bằng `tail` ngay trên lệnh chạy. Fail rồi chạy lại pass → ghi "nghi flaky" kèm đường dẫn log, không ghi "xanh".
 
 Lỗi đã có trên base là baseline. Lỗi mới do PR mới trừ điểm. Không viết "đã test" nếu lệnh chưa chạy và chưa có output.
 
@@ -187,6 +192,8 @@ Không trừ hai lần cho cùng một finding.
 Áp [gates.md](gates.md).
 
 - `review`: in báo cáo trong chat. Không đăng, không sửa.
+- Trước mọi commit (`fix`, `full`, `sync`): chỉ stage đúng file đã sửa, không `git add -A`; `git diff --cached --check` sạch (lệnh này bắt cả dấu conflict còn sót). Không đạt → dừng, không commit. Commit message, body, comment luôn qua file (`-F`, `--body-file`).
+- Conflict CHANGELOG: giữ cả hai mục, mục của PR merge trước ở trên, không dòng trống trong list, không sửa dòng của người khác.
 - `fix`: sửa nhỏ nhất đúng finding đã kiểm chứng. Không refactor kèm. Test cho hành vi vừa sửa khi có lệnh test và viết test là khả thi. Chấm lại một lần. Còn kẹt cổng → dừng, hỏi.
 - `full`: như `fix`, rồi comment và merge chỉ khi cổng merge trong [gates.md](gates.md) mở và chat này đã gọi `full` cho PR này.
 - `test`: báo lệnh, exit code, lỗi mới so với baseline. Không sửa để cho test xanh trừ khi mode là `fix` hoặc `full`.
@@ -197,6 +204,8 @@ Không trừ hai lần cho cùng một finding.
 Ngay trước comment hoặc merge: đọc lại `headRefOid`. Khác SHA đã review → review lại phần mới, không đăng điểm cũ, không merge.
 
 Comment: điền [templates/pr-comment.md](templates/pr-comment.md) theo `language` và `voice`; `self_review` thì theo mục "PR của chính mình" trong template. Không khen thừa. Không câu nào vượt quá bằng chứng ở mục 3–5. Đăng bằng `gh pr comment <n> --repo <slug> --body-file <file>` chỉ khi mode và chat cho phép. Body để ở file tạm ngoài repo.
+
+PR nối nhau, repo squash merge: merge PR dưới trước. Rồi `gh pr edit <trên> --base <base gốc>`, `git rebase --onto <base gốc> <head cũ của PR dưới> <nhánh trên>`, chạy lại test, đọc lại diff, review phần đổi. Push sau rebase là force-push: cần một câu riêng trong chat.
 
 Merge: `gh pr merge <n> --repo <slug> --match-head-commit <SHA đã review>` theo `merge.method` trong config. Config không nói: đọc method repo cho phép (`gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`). Nhiều method đều được → hỏi một lần. Không `--delete-branch` trừ khi được yêu cầu.
 
